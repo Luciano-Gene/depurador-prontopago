@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Depurador Pronto Pago</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --ink:#1c2430; --mute:#6a7686; --line:#e1e5eb;
+    --brand:#1b5fd1; --brand-ink:#fff; --ok:#14804a; --okbg:#e6f5ec;
+    --warn:#a35a00; --warnbg:#fff1dc; --bad:#b3261e; --badbg:#fde8e6; --mono:#f0f2f5;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --bg:#12161c; --card:#1b212a; --ink:#e7ebf1; --mute:#93a0b2; --line:#2c3541;
+      --brand:#4d8dff; --brand-ink:#0b1220; --ok:#5fd39a; --okbg:#14291f;
+      --warn:#f0b35a; --warnbg:#2f2310; --bad:#ff8a80; --badbg:#35171a; --mono:#232b36;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:960px;margin:0 auto;padding:24px 16px 64px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--mute);margin:0 0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+  .cfg{display:flex;gap:16px;flex-wrap:wrap;align-items:end}
+  label{display:flex;flex-direction:column;font-size:13px;color:var(--mute);gap:4px}
+  input[type=number]{width:110px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font-size:15px}
+  #drop{border:2px dashed var(--line);border-radius:10px;padding:34px 16px;text-align:center;cursor:pointer;transition:.15s}
+  #drop.over,#drop:hover,#drop:focus-visible{border-color:var(--brand);background:var(--mono);outline:none}
+  #drop strong{display:block;font-size:16px;margin-bottom:4px}
+  #drop span{color:var(--mute);font-size:13px}
+  button{font:inherit;padding:9px 16px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  button.primary{background:var(--brand);color:var(--brand-ink);border-color:var(--brand);font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .banner{border-radius:8px;padding:12px 14px;font-weight:600;margin-bottom:14px}
+  .banner.ok{background:var(--okbg);color:var(--ok)}
+  .banner.warn{background:var(--warnbg);color:var(--warn)}
+  .banner.bad{background:var(--badbg);color:var(--bad)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .stat{background:var(--mono);border-radius:8px;padding:10px 12px}
+  .stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+  .stat span{font-size:12px;color:var(--mute)}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mute);font-weight:600;font-size:12px}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;word-break:break-all}
+  .tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11.5px;font-weight:600}
+  .tag.ok{background:var(--okbg);color:var(--ok)} .tag.bad{background:var(--badbg);color:var(--bad)}
+  .scroll{overflow-x:auto}
+  .note{color:var(--mute);font-size:12.5px;margin-top:8px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>Depurador Pronto Pago</h1>
+  <p class="sub">Detecta registros duplicados por código de barras, deja uno solo y genera el detalle del escaneo.</p>
+
+  <div class="card">
+    <div class="cfg">
+      <label>Posición inicial del código<input id="ini" type="number" min="1" value="192"></label>
+      <label>Posición final del código<input id="fin" type="number" min="1" value="228"></label>
+      <span class="note" style="margin:0 0 6px">Posiciones desde 1, ambas incluidas (192–228 = 37 caracteres).</span>
+    </div>
+  </div>
+
+  <div id="drop" class="card" tabindex="0" role="button" aria-label="Elegir archivo">
+    <strong>Arrastrá el archivo acá o hacé clic para elegirlo</strong>
+    <span>Ej.: PRONTOPAGO.201026 (cualquier archivo de texto plano)</span>
+    <input id="file" type="file" hidden>
+  </div>
+
+  <div id="result" hidden>
+    <div class="card">
+      <div id="banner" class="banner"></div>
+      <div class="grid" id="stats"></div>
+      <div class="actions">
+        <button id="dlClean" class="primary">⬇ Descargar archivo sin duplicados</button>
+        <button id="dlReport">⬇ Descargar detalle del escaneo (.txt)</button>
+        <button id="newQuery">↺ Nueva consulta</button>
+      </div>
+      <div class="note" id="notes"></div>
+    </div>
+    <div class="card" id="dupCard" hidden>
+      <h2 style="font-size:16px;margin:0 0 10px">Duplicados encontrados</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Código de barras</th><th>Líneas</th><th>Conservada</th><th>Eliminadas</th><th>¿Líneas idénticas?</th><th>Registro</th></tr></thead>
+        <tbody id="dupRows"></tbody>
+      </table></div>
+    </div>
+  </div>
+</main>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const drop = $('drop'), fileIn = $('file');
+  let state = null; // {name, cleanBlob, reportText}
+
+  drop.addEventListener('click', () => fileIn.click());
+  drop.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); fileIn.click(); } });
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) process(e.dataTransfer.files[0]); });
+  fileIn.addEventListener('change', () => { if (fileIn.files[0]) process(fileIn.files[0]); fileIn.value=''; });
+  // Reprocesar si cambian las posiciones
+  let lastFile = null;
+  ['ini','fin'].forEach(id => $(id).addEventListener('change', () => { if (lastFile) process(lastFile); }));
+
+  const n = x => x.toLocaleString('es-AR');
+  const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const latin = (u8,a,b) => { let s=''; for(let i=a;i<b;i++) s+=String.fromCharCode(u8[i]); return s; };
+  // Decodifica para mostrar: intenta UTF-8, si no, latin1
+  function show(u8,a,b){
+    const sl = u8.subarray(a,b);
+    try { return new TextDecoder('utf-8',{fatal:true}).decode(sl); }
+    catch(e){ return new TextDecoder('latin1').decode(sl); }
+  }
+
+  async function process(file){
+    lastFile = file;
+    const ini = parseInt($('ini').value,10), fin = parseInt($('fin').value,10);
+    if (!(ini>=1) || !(fin>=ini)) { alert('Revisá las posiciones: la final debe ser mayor o igual a la inicial.'); return; }
+    const t0 = performance.now();
+    const u8 = new Uint8Array(await file.arrayBuffer());
+
+    // 1) Partir en líneas SIN decodificar (se conservan los bytes originales)
+    const starts=[], ends=[];       // [start,end) sin salto; ends excluye \n
+    let s=0, crlf=0;
+    for (let i=0;i<u8.length;i++){
+      if (u8[i]===10){ starts.push(s); ends.push(i); if(i>s && u8[i-1]===13) crlf++; s=i+1; }
+    }
+    const finalSinSalto = s<u8.length;
+    if (finalSinSalto){ starts.push(s); ends.push(u8.length); }
+    const total = starts.length;
+
+    // 2) Clave = posiciones ini..fin de cada línea
+    const map = new Map(); let cortas=0, vacias=0;
+    const shortList=[];
+    for (let i=0;i<total;i++){
+      let a=starts[i], b=ends[i];
+      if (b>a && u8[b-1]===13) b--;       // ignorar \r
+      const len=b-a;
+      let key;
+      if (len < fin){ cortas++; if(shortList.length<20) shortList.push(i+1); key = latin(u8,a+Math.min(ini-1,len),b); }
+      else key = latin(u8,a+ini-1,a+fin);
+      if (key.trim()==='') vacias++;
+      const arr = map.get(key); if (arr) arr.push(i); else map.set(key,[i]);
+    }
+
+    // 3) Duplicados: se conserva la primera aparición
+    const drop = new Set(), dups=[];
+    for (const [key,idx] of map){
+      if (idx.length>1){
+        const first = u8.subarray(starts[idx[0]], ends[idx[0]]);
+        let identicas = true;
+        for (let k=1;k<idx.length;k++){
+          const o = u8.subarray(starts[idx[k]], ends[idx[k]]);
+          if (o.length!==first.length || !first.every((v,j)=>v===o[j])) { identicas=false; break; }
+          drop.add(idx[k]);
+        }
+        if(!identicas) for (let k=1;k<idx.length;k++) drop.add(idx[k]);
+        let a=starts[idx[0]], b=ends[idx[0]]; if(b>a && u8[b-1]===13) b--;
+        dups.push({key, lines: idx.map(x=>x+1), identicas, preview: show(u8,a,b).replace(/\s+/g,' ').trim()});
+      }
+    }
+
+    // 4) Archivo limpio (mismos bytes, mismo orden, mismos saltos de línea)
+    let cleanBlob = null;
+    const kept = total - drop.size;
+    if (drop.size){
+      const parts=[];
+      for (let i=0;i<total;i++){
+        if (drop.has(i)) continue;
+        const hasNl = ends[i] < u8.length;   // la línea terminaba con \n
+        parts.push(u8.subarray(starts[i], hasNl ? ends[i]+1 : ends[i]));
+      }
+      cleanBlob = new Blob(parts,{type:'application/octet-stream'});
+    }
+    const ms = Math.round(performance.now()-t0);
+
+    // 5) Reporte
+    const now = new Date();
+    const stamp = now.toLocaleString('es-AR');
+    const noIdent = dups.filter(d=>!d.identicas);
+    let rep = '';
+    rep += 'DETALLE DEL ESCANEO - DEPURADOR PRONTO PAGO\n';
+    rep += '==========================================\n';
+    rep += `Fecha y hora        : ${stamp}\n`;
+    rep += `Archivo analizado   : ${file.name}\n`;
+    rep += `Tamaño              : ${n(file.size)} bytes\n`;
+    rep += `Campo analizado     : posiciones ${ini} a ${fin} (${fin-ini+1} caracteres)\n`;
+    rep += `Saltos de línea     : ${crlf? 'CRLF (Windows)':'LF'}\n\n`;
+    rep += `Líneas analizadas   : ${n(total)}\n`;
+    rep += `Códigos distintos   : ${n(map.size)}\n`;
+    rep += `Códigos duplicados  : ${n(dups.length)}\n`;
+    rep += `Líneas eliminadas   : ${n(drop.size)}\n`;
+    rep += `Líneas en archivo final: ${n(kept)}\n`;
+    rep += `Líneas más cortas que la posición final: ${n(cortas)}\n`;
+    rep += `Líneas con el campo vacío: ${n(vacias)}\n\n`;
+    if (!dups.length) rep += 'RESULTADO: SIN DUPLICADOS. El archivo no requiere cambios.\n';
+    else {
+      rep += `RESULTADO: SE ELIMINARON ${drop.size} LÍNEA(S) DUPLICADA(S). Se conservó la primera aparición de cada código.\n\n`;
+      rep += 'DUPLICADOS ENCONTRADOS\n----------------------\n';
+      dups.forEach((d,i)=>{
+        rep += `${i+1}) Código: ${d.key.trim()}\n`;
+        rep += `   Líneas: ${d.lines.map(n).join(', ')} | Conservada: ${n(d.lines[0])} | Eliminadas: ${d.lines.slice(1).map(n).join(', ')}\n`;
+        rep += `   Líneas completas idénticas: ${d.identicas?'SÍ':'NO - REVISAR'}\n`;
+        rep += `   Registro: ${d.preview}\n\n`;
+      });
+    }
+    if (noIdent.length) rep += 'ATENCIÓN: hay códigos repetidos cuyas líneas NO son idénticas; revisar manualmente.\n';
+    if (cortas) rep += `ATENCIÓN: ${cortas} línea(s) más cortas que la posición ${fin} (ej.: líneas ${shortList.join(', ')}).\n`;
+    if (vacias) rep += `ATENCIÓN: ${vacias} línea(s) con el campo de código vacío.\n`;
+
+    state = { name:file.name, cleanBlob, reportText:rep };
+    render({file,total,uniq:map.size,dups,drop:drop.size,kept,cortas,vacias,noIdent,ms,ini,fin,shortList});
+  }
+
+  function render(r){
+    $('result').hidden=false;
+    const b=$('banner');
+    if (!r.dups.length){ b.className='banner ok'; b.textContent='✔ Sin duplicados. El archivo no requiere cambios.'; }
+    else if (r.noIdent.length){ b.className='banner bad'; b.textContent=`Se eliminaron ${r.drop} línea(s), pero ${r.noIdent.length} código(s) repetido(s) tenían registros DISTINTOS: revisalos.`; }
+    else { b.className='banner warn'; b.textContent=`Se encontraron ${r.dups.length} código(s) duplicado(s). Se eliminaron ${r.drop} línea(s) idéntica(s).`; }
+    const st=(v,l)=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+    $('stats').innerHTML = st(n(r.total),'Líneas analizadas')+st(n(r.uniq),'Códigos distintos')+st(n(r.dups.length),'Códigos duplicados')+st(n(r.drop),'Líneas eliminadas')+st(n(r.kept),'Líneas en archivo final');
+    const notes=[`Archivo: ${esc(r.file.name)} · campo ${r.ini}–${r.fin} · procesado en ${r.ms} ms.`];
+    if (r.cortas) notes.push(`⚠ ${n(r.cortas)} línea(s) más cortas que la posición ${r.fin} (ej.: ${r.shortList.slice(0,8).join(', ')}).`);
+    if (r.vacias) notes.push(`⚠ ${n(r.vacias)} línea(s) con el código vacío.`);
+    $('notes').innerHTML = notes.join('<br>');
+    $('dlClean').disabled = !state.cleanBlob;
+    $('dupCard').hidden = !r.dups.length;
+    $('dupRows').innerHTML = r.dups.map(d=>`<tr>
+      <td><code>${esc(d.key.trim())}</code></td>
+      <td>${d.lines.map(n).join(', ')}</td>
+      <td>${n(d.lines[0])}</td>
+      <td>${d.lines.slice(1).map(n).join(', ')}</td>
+      <td><span class="tag ${d.identicas?'ok':'bad'}">${d.identicas?'Sí':'No, revisar'}</span></td>
+      <td><code>${esc(d.preview.length>110?d.preview.slice(0,110)+'…':d.preview)}</code></td></tr>`).join('');
+  }
+
+  function download(blob,name){
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  }
+  $('newQuery').addEventListener('click', ()=>{
+    state=null; lastFile=null; fileIn.value='';
+    $('result').hidden=true; $('dupRows').innerHTML=''; $('stats').innerHTML=''; $('notes').innerHTML='';
+    window.scrollTo({top:0,behavior:'smooth'}); drop.focus();
+  });
+  $('dlClean').addEventListener('click', ()=>{ if(state&&state.cleanBlob) download(state.cleanBlob, state.name); });
+  $('dlReport').addEventListener('click', ()=>{ if(state) download(new Blob(['﻿'+state.reportText],{type:'text/plain;charset=utf-8'}), 'Detalle_escaneo_'+state.name+'.txt'); });
+})();
+</script>
+</body>
+</html>
